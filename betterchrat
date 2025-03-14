@@ -1,0 +1,162 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+local AimlockTarget = nil
+local AimSmoothing = 0.2  -- Adjust smoothness (higher = slower)
+local HeadHitboxSize = Vector3.new(3, 3, 3) -- Bigger head hitbox
+
+-- ESP Table to Store Player UI
+local ESPObjects = {}
+
+-- Function to Create ESP
+function CreateESP(Player)
+    if Player == LocalPlayer then return end
+    if ESPObjects[Player] then return end  -- Prevent duplicate ESP
+
+    local ESPBox = Drawing.new("Square")
+    local NameTag = Drawing.new("Text")
+
+    -- ESP Box Properties
+    ESPBox.Color = Color3.fromRGB(255, 0, 0)  -- Red
+    ESPBox.Thickness = 2
+    ESPBox.Filled = false
+    ESPBox.Transparency = 1
+
+    -- Nametag Properties
+    NameTag.Size = 16
+    NameTag.Center = true
+    NameTag.Outline = true
+    NameTag.Color = Color3.fromRGB(255, 255, 255)  -- White
+
+    -- Store ESP Objects
+    ESPObjects[Player] = {Box = ESPBox, Name = NameTag}
+
+    -- Remove ESP when Player Dies
+    Player.CharacterRemoving:Connect(function()
+        if ESPObjects[Player] then
+            ESPObjects[Player].Box:Remove()
+            ESPObjects[Player].Name:Remove()
+            ESPObjects[Player] = nil
+        end
+    end)
+end
+
+-- Function to Update ESP Positions
+function UpdateESP()
+    for Player, Objects in pairs(ESPObjects) do
+        if Player.Character and Player.Character:FindFirstChild("HumanoidRootPart") and Player.Character:FindFirstChild("Head") then
+            local RootPart = Player.Character.HumanoidRootPart
+            local Head = Player.Character.Head
+
+            local Pos, OnScreen = Camera:WorldToViewportPoint(RootPart.Position)
+            local HeadPos, _ = Camera:WorldToViewportPoint(Head.Position + Vector3.new(0, 0.5, 0))
+
+            if OnScreen then
+                local BoxSize = Vector2.new(2000 / Pos.Z, 3000 / Pos.Z)
+                Objects.Box.Size = BoxSize
+                Objects.Box.Position = Vector2.new(Pos.X - BoxSize.X / 2, Pos.Y - BoxSize.Y / 2)
+                Objects.Box.Visible = true
+
+                Objects.Name.Position = Vector2.new(HeadPos.X, HeadPos.Y - 15)
+                Objects.Name.Text = Player.Name
+                Objects.Name.Visible = true
+            else
+                Objects.Box.Visible = false
+                Objects.Name.Visible = false
+            end
+        else
+            -- Remove ESP if Character is missing
+            if ESPObjects[Player] then
+                ESPObjects[Player].Box.Visible = false
+                ESPObjects[Player].Name.Visible = false
+            end
+        end
+    end
+end
+
+-- Function to Detect the Player You're Looking At
+function GetLookingAtPlayer()
+    local MouseLocation = UserInputService:GetMouseLocation()
+    local UnitRay = Camera:ScreenPointToRay(MouseLocation.X, MouseLocation.Y)
+    
+    local RaycastParams = RaycastParams.new()
+    RaycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+    RaycastParams.FilterDescendantsInstances = {LocalPlayer.Character}
+
+    -- Increase Raycast Range to Detect Players from Further Away
+    local Result = workspace:Raycast(UnitRay.Origin, UnitRay.Direction * 5000, RaycastParams)
+
+    if Result and Result.Instance then
+        local HitPlayer = Players:GetPlayerFromCharacter(Result.Instance.Parent)
+        if HitPlayer and HitPlayer ~= LocalPlayer then
+            return HitPlayer
+        end
+    end
+    return nil
+end
+
+-- Function to Get Head Position with Bigger Hitbox
+function GetHeadPosition(Player)
+    if Player and Player.Character and Player.Character:FindFirstChild("Head") then
+        local Head = Player.Character.Head
+        local HeadPosition = Head.Position + Vector3.new(0, HeadHitboxSize.Y / 2, 0) -- Adjusted for bigger hitbox
+        return Camera:WorldToViewportPoint(HeadPosition)
+    end
+    return nil
+end
+
+-- Function to Check if Player is Within Hitbox Range
+function IsWithinHitbox(MousePos, HeadPos)
+    local HitboxRadius = 75  -- Increased hitbox size
+    return (Vector2.new(MousePos.X, MousePos.Y) - Vector2.new(HeadPos.X, HeadPos.Y)).Magnitude < HitboxRadius
+end
+
+-- Attach ESP to All Players
+for _, player in pairs(Players:GetPlayers()) do
+    CreateESP(player)
+    player.CharacterAdded:Connect(function()
+        repeat wait() until player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+        CreateESP(player)
+    end)
+end
+
+Players.PlayerAdded:Connect(function(player)
+    CreateESP(player)
+    player.CharacterAdded:Connect(function()
+        repeat wait() until player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+        CreateESP(player)
+    end)
+end)
+
+-- Aimlock Toggle (Right Click)
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if input.UserInputType == Enum.UserInputType.MouseButton2 then  -- Right Click
+        if AimlockTarget then
+            AimlockTarget = nil  -- Turn off aimlock if it's active
+        else
+            local Target = GetLookingAtPlayer()
+            if Target then
+                AimlockTarget = Target
+            end
+        end
+    end
+end)
+
+-- Aimlock Tracking
+RunService.RenderStepped:Connect(function()
+    UpdateESP()
+    if AimlockTarget then
+        local HeadPos = GetHeadPosition(AimlockTarget)
+        if HeadPos then
+            local MousePos = UserInputService:GetMouseLocation()
+            
+            -- Check if the target is within the bigger hitbox range
+            if IsWithinHitbox(MousePos, HeadPos) then
+                local SmoothMove = Vector2.new(MousePos.X, MousePos.Y) + (Vector2.new(HeadPos.X, HeadPos.Y) - MousePos) * AimSmoothing
+                mousemoverel(SmoothMove.X - MousePos.X, SmoothMove.Y - MousePos.Y)
+            end
+        end
+    end
+end)
