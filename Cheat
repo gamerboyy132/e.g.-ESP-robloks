@@ -1,0 +1,133 @@
+loadstring([[
+local ESP = Instance.new("Folder", game.CoreGui)
+ESP.Name = "ESP"
+
+local camera = game.Workspace.CurrentCamera
+local localPlayer = game.Players.LocalPlayer
+local mouse = localPlayer:GetMouse()
+
+local targetPlayer = nil -- The player currently locked onto
+local lockOn = false -- Whether the camera is locked on to a player
+
+-- Smooth camera follow settings
+local smoothFactor = 0.1 -- Smaller values result in smoother (slower) camera movement
+
+local function createESP(player)
+    if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+        local hrp = player.Character.HumanoidRootPart
+        local head = player.Character:FindFirstChild("Head")
+
+        -- Check for ForceField to determine if the player is protected
+        local forceField = player.Character:FindFirstChildOfClass("ForceField")
+
+        -- Create a BoxHandleAdornment to represent the red box around the player
+        local box = Instance.new("BoxHandleAdornment")
+        box.Parent = ESP
+        box.Adornee = hrp
+        box.Size = player.Character.HumanoidRootPart.Size + Vector3.new(2, 4, 2) -- Slightly larger box than the player
+        box.Color3 = Color3.fromRGB(255, 0, 0) -- Red color for the box (default)
+        box.Transparency = 0.5 -- Half transparent
+        box.AlwaysOnTop = true
+        box.ZIndex = 5
+
+        -- Create a BillboardGui for the nametag
+        local billboard = Instance.new("BillboardGui")
+        billboard.Parent = ESP
+        billboard.Adornee = hrp
+        billboard.Size = UDim2.new(4, 0, 1, 0)
+        billboard.StudsOffset = Vector3.new(0, 3, 0)
+        billboard.AlwaysOnTop = true
+
+        local textLabel = Instance.new("TextLabel", billboard)
+        textLabel.Size = UDim2.new(1, 0, 1, 0)
+        textLabel.TextScaled = true
+        textLabel.BackgroundTransparency = 1
+        textLabel.Font = Enum.Font.SourceSansBold
+
+        -- Set the text color based on the team and ForceField status
+        if player.TeamColor == localPlayer.TeamColor then
+            textLabel.TextColor3 = Color3.fromRGB(0, 255, 0) -- Green for teammates
+        else
+            -- If the player has a ForceField (protected), make the name tag green
+            if forceField then
+                textLabel.TextColor3 = Color3.fromRGB(0, 255, 0) -- Green for protected players
+            else
+                textLabel.TextColor3 = Color3.fromRGB(255, 0, 0) -- Red for unprotected (vulnerable) players
+            end
+        end
+
+        textLabel.Text = player.Name
+
+        -- Function to update the nametag size based on distance
+        local function updateNametagSize()
+            local distance = (hrp.Position - camera.CFrame.Position).Magnitude
+            local scaleFactor = math.min(distance / 50, 5) -- Maximum size scale factor of 5
+            textLabel.TextSize = 14 * scaleFactor -- Adjust the text size based on the distance
+        end
+
+        -- Update the nametag size every frame
+        game:GetService("RunService").RenderStepped:Connect(updateNametagSize)
+    end
+end
+
+local function updateESP()
+    ESP:ClearAllChildren()
+    for _, player in pairs(game.Players:GetPlayers()) do
+        if player ~= localPlayer then
+            createESP(player)
+        end
+    end
+end
+
+-- Function to find the player you're looking at (with raycast)
+local function findPlayerAtMousePosition()
+    local ray = camera:ScreenPointToRay(mouse.X, mouse.Y)
+    local hitPart = game.Workspace:FindPartOnRay(ray)
+    
+    -- Check if the hit part belongs to a player character's head
+    if hitPart then
+        local character = hitPart.Parent
+        if character and character:FindFirstChild("Head") then
+            local player = game.Players:GetPlayerFromCharacter(character)
+            return player
+        end
+    end
+    return nil
+end
+
+-- Right-click detection to lock on the player's head
+mouse.Button2Down:Connect(function()
+    local playerToLockOn = findPlayerAtMousePosition()
+    
+    if playerToLockOn then
+        -- Only lock on to a new player if it's different from the current target
+        if playerToLockOn ~= targetPlayer then
+            targetPlayer = playerToLockOn
+            lockOn = true
+        end
+    end
+end)
+
+-- Right-click release to stop locking onto a player
+mouse.Button2Up:Connect(function()
+    lockOn = false
+    targetPlayer = nil
+end)
+
+-- Update camera to follow the player's head when locked on
+game:GetService("RunService").RenderStepped:Connect(function()
+    if lockOn and targetPlayer and targetPlayer.Character then
+        local head = targetPlayer.Character:FindFirstChild("Head")
+        if head then
+            -- Smooth camera follow to the player's head using linear interpolation (lerp)
+            local targetPosition = head.Position
+            local smoothCameraPosition = camera.CFrame.Position:Lerp(targetPosition, smoothFactor)
+            camera.CFrame = CFrame.new(smoothCameraPosition, targetPosition)
+        end
+    end
+end)
+
+game.Players.PlayerAdded:Connect(updateESP)
+game.Players.PlayerRemoving:Connect(updateESP)
+game:GetService("RunService").RenderStepped:Connect(updateESP)
+]])()
